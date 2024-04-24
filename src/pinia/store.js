@@ -1,6 +1,6 @@
-import { getCurrentInstance, inject, reactive, toRefs, computed, isRef } from "vue"
+import { getCurrentInstance, inject, reactive, toRefs, computed, isRef, watch } from "vue"
 import { PiniaSymbol } from "./rootState.js"
-
+import { addSubscription, triggerSubscriptions } from "./sub.js" // 发布和订阅
 function isObject(val) {
     return typeof val === 'object' && val !== null
 }
@@ -8,14 +8,14 @@ function createOptionStore(id, options, pinia) {
     const { state, actions, getters = {} } = options
 
     // pinia就是创建了一个响应式对象而已
-    const store = reactive({})
-
-    function wrapAction(action) {
-        return function () {
-            // 将action之中的this永远处理成store，保证this的指向的问题
-            return action.call(store, ...arguments)
-        }
-    }
+    // const store = reactive({})
+    //
+    // function wrapAction(action) {
+    //     return function () {
+    //         // 将action之中的this永远处理成store，保证this的指向的问题
+    //         return action.call(store, ...arguments)
+    //     }
+    // }
 
     function setup() {
         // 用户提供的状态
@@ -37,8 +37,14 @@ function createOptionStore(id, options, pinia) {
         return setupStore
     }
 
-    createSetupStore(id, setup, pinia) // 转换为setup语法
+    const store = createSetupStore(id, setup, pinia) // 转换为setup语法
 
+    store.$reset = function() { // 官网有说明，此方法只会支持optionApi,
+        const newState = state ? state() : {}
+        // debugger
+        this.$patch(newState)
+    }
+    // return store
 }
 
 
@@ -86,14 +92,58 @@ function createSetupStore(id, setup, pinia, isSetupStore) {
         // {a: {a: 1, b: 2}} {a: {a: 2}} {a: {a: 2, b: 2}}
         // console.log(pinia.state.value[id])
     }
+
+    const actionSubscriptions = [] // 所有订阅 action的事件，都应该放到此数组之中
     const partialStore = {
-        $patch
+        $patch,
+        $subscribe(callback) {
+            // 默认vue3之中watch一个响应式数据，深度监控的，可以直接放一个响应式的对象
+            watch(pinia.state.value[id], (state) => {
+                callback({id}, state)
+            })
+        },
+        // 订阅
+        $onAction: addSubscription.bind(null, actionSubscriptions)
     }
     const store = reactive(partialStore)
     function wrapAction(action) {
         return function () {
             // 将action之中的this永远处理成store，保证this的指向的问题
-            return action.call(store, ...arguments)
+            // return action.call(store, ...arguments)
+
+            const afterCallbacks = []
+            const onErrorCallbacks = []
+            const after = (callback) => {
+                afterCallbacks.push(callback)
+            }
+            const onError = (callback) => {
+                onErrorCallbacks.push(callback)
+            }
+
+            // 让用户传递after和 error
+            triggerSubscriptions(actionSubscriptions, {
+                after, onError
+            })
+            let ret
+
+            // 回调的方式
+            try {
+                // 正常action是一个回调的情况，我们可以直接拿到返回值触发after回调
+                ret = action.call(store, ...arguments)
+                triggerSubscriptions(afterCallbacks, ret)
+            } catch(e) {
+                triggerSubscriptions(onErrorCallbacks, e)
+            }
+
+            // 返回值是promise的情况 针对场景做处理
+            if (ret instanceof Promise) {
+                return ret.then(val => {
+                    triggerSubscriptions(afterCallbacks, val)
+                }).catch(err => {
+                    triggerSubscriptions(afterCallbacks, err)
+                })
+            }
+            return ret
         }
     }
     if (isSetupStore) {

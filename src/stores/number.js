@@ -7,8 +7,14 @@ export const useNumberStore = defineStore('number', () => { // setup 同组件�
         return number.value * 2
     })
 
-    const increment = (payload) => {
-        number.value += payload
+    const increment = async (payload) => {
+        // number.value += payload
+        return new Promise(resolve => {
+            setTimeout(() => {
+                number.value += payload
+                resolve()
+            }, 1000)
+        })
     }
     return {
         number, // 状态

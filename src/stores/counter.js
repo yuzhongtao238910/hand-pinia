@@ -15,8 +15,12 @@ export const useCounterStore = defineStore("counter", {
     },
     actions: { // methods
         increment() {
-            console.log(this, 1777)
+            // console.log(this, 1777)
+            // 状态更新后，保存到本地
             this.count++
+        },
+        decrement(payload) {
+            this.count-=payload
         }
     }
 })
